@@ -1,0 +1,12 @@
+{application, tree_db,
+ [
+  {description, ""},
+  {vsn, "1"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {mod, { tree_db_app, []}},
+  {env, []}
+ ]}.
