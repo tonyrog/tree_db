@@ -367,9 +367,9 @@ join([A],_S) -> [A];
 join([A|As],S) -> [A,S|join(As,S)].
 
 timestamp() ->
-    erlang:system_time(micro_seconds).
-%% timestamp() ->
-%%  {A,B,C} = os:timestamp(),
-%%  ((A*1000000+B)*1000000)+C.
-%%
-    
+    try erlang:system_time(micro_seconds)
+    catch
+	error:undef ->
+	    {MS,S,US} = os:timestamp(),
+	    (MS*1000000+S)*1000000+US
+    end.
