@@ -76,7 +76,8 @@ init([Name]) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_call(stop, _From, State) ->
+handle_call(stop, _From, State=#state{ table = Table }) ->
+    ets:delete(Table),
     {stop, normal, ok, State};
 handle_call(_Request, _From, State) ->
     {reply, {error, bad_call}, State}.
