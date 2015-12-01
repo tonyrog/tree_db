@@ -17,6 +17,7 @@
 
 -export([enql/3, enqr/3]).
 -export([match_keys/2]).
+-export([internal_key/1, external_key/1]).
 
 -define(QUEUE_T(), term()).  %% R15 !
 
