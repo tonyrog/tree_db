@@ -142,7 +142,10 @@ match_success(Config) when is_list(Config) ->
     ?line true = tree_db:match_keys("*", "a.b.c.a.b.c.a.b.c"),
     ?line true = tree_db:match_keys("a.*", "a.b.c.a.b.c.a.b.c"),
     ?line true = tree_db:match_keys("*.c", "a.b.c.a.b.c.a.b.c"),
+    ?line true = tree_db:match_keys("a.*.c", "a.b.c.a.b.c.a.b.c"),
+    ?line true = tree_db:match_keys("a.*.a.b.*.c", "a.b.c.a.b.c.a.b.c"),
     ?line true = tree_db:match_keys("a.b[*].c.d[*]", "a.b.2.c.d.3"),
+    ?line true = tree_db:match_keys("a.b[2].c.d[*]", "a.b.2.c.d.3"),
     ok.
 
 match_failure(doc) ->
@@ -151,6 +154,8 @@ match_failure(suite) -> [];
 match_failure(Config) when is_list(Config) ->
     ?line false = tree_db:match_keys("*.b", "a.b.c.a.b.c.a.b.c"),
     ?line false = tree_db:match_keys("b.*", "a.b.c.a.b.c.a.b.c"),
+    ?line false = tree_db:match_keys("*.a.c.*", "a.b.c.a.b.c.a.b.c"),
+    ?line false = tree_db:match_keys("*.a.b.a.*.c", "a.b.c.a.b.c.a.b.c"),
     ok.
 
 %%--------------------------------------------------------------------

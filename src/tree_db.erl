@@ -17,7 +17,7 @@
 
 -export([enql/3, enqr/3]).
 -export([match_keys/2]).
--export([internal_key/1, external_key/1]).
+-export([internal_key/1, external_key/1, pattern_key/1]).
 
 -define(QUEUE_T(), term()).  %% R15 !
 
@@ -366,8 +366,13 @@ ipath([P|Ps],Match) ->
     case binary:split(P,<<"[">>) of
 	[<<"*">>] when Match ->
 	    [ '_' | ipath(Ps,Match)];
-	[P] ->
-	    %% existing atom?
+	[P= <<C,_/binary>>] when C >= $0, C =< $9 ->
+	    try binary_to_integer(P) of
+		I -> [I | ipath(Ps,Match)]
+	    catch
+		error:_ -> error(bad_key)
+	    end;
+	[P] -> %% existing atom?
 	    [ binary_to_atom(P, latin1) | ipath(Ps,Match) ];
 	[P1,<<"*]">>] when Match ->
 	    [ binary_to_atom(P1, latin1),'_' | ipath(Ps,Match) ]; 
