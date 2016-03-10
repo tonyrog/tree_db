@@ -295,13 +295,45 @@ enqr_(Table,K,Q) ->
 match_keys(Match, Key) ->
     M = pattern_key(Match),
     K = internal_key(Key),
-    match(M, K).
+    match_ikeys(M, K).
+
+match_ikeys(M, K) ->
+    case match(M,K) of
+	fail -> false;
+	R -> R
+    end.
 
 match(['_'], _) -> true;
-match(['_'|Ms],[_|Ks]) -> match(Ms,Ks);
+match(['_'|Ms],Ks) -> match__(Ms,Ks);
 match([K|Ms],[K|Ks]) -> match(Ms,Ks);
+match([_],[_]) -> false;
 match([],[]) -> true;
-match(_, _) -> false.
+match(_, _) -> fail.
+
+match_(['_'|Ms],Ks) -> match__(Ms,Ks);
+match_([K|Ms], Ks) ->
+    case match_drop(K, Ks) of
+	false -> false;
+	Ks1 -> match(Ms,Ks1)
+    end;
+match_([], []) -> true;
+match_(_, _) -> fail.
+
+match__(Ms,Ks) ->
+    %% io:format("match__: ms=~w, ks=~w\n", [Ms,Ks]),
+    case lists:member('_', Ms) of
+	false -> lists:suffix(Ms, Ks);
+	true ->
+	    case match_(Ms, Ks) of
+		fail when Ks =/= [] ->
+		    match__(Ms, tl(Ks));
+		R -> R
+	    end
+    end.
+
+match_drop(K, [K|Ks]) -> Ks;
+match_drop(K, [_|Ks]) -> match_drop(K,Ks);
+match_drop(_K, []) -> false.
 
 %%
 %% Match keys are in the form of normal keys or:
