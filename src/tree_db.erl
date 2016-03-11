@@ -367,7 +367,7 @@ ipath([P|Ps],Match) ->
 	[<<"*">>] when Match ->
 	    [ '_' | ipath(Ps,Match)];
 	[P= <<C,_/binary>>] when C >= $0, C =< $9 ->
-	    try binary_to_integer(P) of
+	    try bin_to_integer(P) of
 		I -> [I | ipath(Ps,Match)]
 	    catch
 		error:_ -> error(bad_key)
@@ -386,6 +386,9 @@ ipath([P|Ps],Match) ->
     end;
 ipath([],_Match) ->
     [].
+
+bin_to_integer(Bin) -> %% R15 support
+    list_to_integer(binary_to_list(Bin)).
 
 external_key(Key) when ?is_internal_key(Key) ->
     iolist_to_binary(join(xpath(Key), $.)).
