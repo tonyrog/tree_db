@@ -14,6 +14,7 @@
 	 depth_first/3, breadth_first/3]).
 -export([put/3, put/4, get/2, get_ts/2]).
 -export([update_counter/3, update_timestamp/2, update_timestamp/3]).
+-export([fold_matching/4]).
 
 -export([enql/3, enqr/3]).
 -export([match_keys/2]).
@@ -31,6 +32,7 @@
 -type eot() :: '$end_of_table'.
 -type internal_key() :: [atom()|integer()].
 -type external_key() :: binary() | string().
+-type pattern_key()  :: [atom()|'_'|integer()].
 -type key() :: internal_key() | external_key().
 -type table() :: term().
 -type timestamp() :: integer().
@@ -53,9 +55,19 @@ insert(T, {Key, Value}) ->
 
 -spec lookup(Table::table(), Key::key()) -> [term()].
 lookup(Table, Key) ->
-    case ets:lookup(Table,internal_key(Key)) of
+    K = internal_key(Key),
+    case lookup_(Table, K) of
+	[] -> [];
+	[{K,Value}] -> [{external_key(K),Value}];
+	[{_K,Value}] -> [{Key,Value}]
+    end.
+
+-spec lookup_(Table::table(), K::internal_key()) -> 
+		     [{K::internal_key(),Value::term()}].
+lookup_(Table, K) ->
+    case ets:lookup(Table,K) of
 	[{K,Value,_Ts}] ->
-	    [{external_key(K),Value}];
+	    [{K,Value}];
 	[] ->
 	    []
     end.
@@ -186,6 +198,25 @@ is_sibling_([H1], [H2|_], Parent) when H1 =/= H2 ->
 is_sibling_(_, _, _) ->
     false.
 
+-spec fold_matching(Table::table(), Pattern::external_key(),
+		    Func::fun((Key::internal_key(),Value::term(),Acc::term) ->
+				  term()),
+		    Acc::term()) ->
+			   term().
+
+fold_matching(Table, Pattern, Func, Acc) ->
+    PatternKey = pattern_key(Pattern),
+    Parent = fixed_prefix(PatternKey),
+    Q = enql(Table,Parent,queue:new()),
+    foldbl_(Table,
+	    fun(Elem={Key,_Value}, Acci) ->
+		    %% io:format("match ~p\n", [Key]),
+		    case match_keys(PatternKey, Key) of
+			true -> Func(Elem,Acci);
+			false -> Acci
+		    end
+	    end, Acc, Q).
+
 %% depth first traversal
 depth_first(Table,Func,Acc) ->
     foldl(Table,Func,Acc).
@@ -227,7 +258,7 @@ foldbl(Table,Func,Acc) ->
 foldbl_(Table,Func,Acc,Q) ->
     case queue:out(Q) of
 	{{value,K},Q1} ->
-	    Q2 = enql(Table,K,Q1),	    
+	    Q2 = enql(Table,K,Q1),
 	    case lookup(Table,K) of
 		[Elem] ->
 		    Acc1 = Func(Elem,Acc),
@@ -342,6 +373,9 @@ match_drop(_K, []) -> false.
 %% "a[*]"
 %% "a.b[2].*"
 %% convert a string or a binary into a internal key
+
+-spec pattern_key(Key::internal_key() | external_key()) ->
+			 pattern_key().
 pattern_key(Key) when ?is_internal_key(Key) ->
     Key;
 pattern_key(Name) when is_binary(Name) ->
@@ -406,6 +440,11 @@ xpath([]) ->
 join([],_S) -> [];
 join([A],_S) -> [A];
 join([A|As],S) -> [A,S|join(As,S)].
+
+%% get the fixed key pattern prefix if any
+fixed_prefix(['_'|_]) -> [];
+fixed_prefix([K|Ks]) -> [K|fixed_prefix(Ks)];
+fixed_prefix([]) -> [].
 
 timestamp() ->
     try erlang:system_time(micro_seconds)
