@@ -198,9 +198,11 @@ is_sibling_([H1], [H2|_], Parent) when H1 =/= H2 ->
 is_sibling_(_, _, _) ->
     false.
 
--spec fold_matching(Table::table(), Pattern::external_key(),
-		    Func::fun((Key::internal_key(),Value::term(),Acc::term) ->
-				  term()),
+-spec fold_matching(Table::table(), 
+		    Pattern::external_key(),
+		    Func::fun(({Key::external_key(),Value::term()},
+			       Acc::term()) ->
+				     term()),
 		    Acc::term()) ->
 			   term().
 
