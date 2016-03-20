@@ -14,7 +14,8 @@
 	 depth_first/3, breadth_first/3]).
 -export([put/3, put/4, get/2, get_ts/2]).
 -export([update_counter/3, update_timestamp/2, update_timestamp/3]).
--export([fold_matching/4]).
+-export([fold_matching/4, foldl_matching/4, foldr_matching/4]).
+-export([from_list/2, to_list/1, to_list/2]).
 
 -export([enql/3, enqr/3]).
 -export([match_keys/2]).
@@ -32,10 +33,14 @@
 -type eot() :: '$end_of_table'.
 -type internal_key() :: [atom()|integer()].
 -type external_key() :: binary() | string().
--type pattern_key()  :: [atom()|'_'|integer()].
+-type pattern_key()  :: [atom()|integer()|'*'|'?'].
 -type key() :: internal_key() | external_key().
 -type table() :: term().
 -type timestamp() :: integer().
+%% fold functions get internal key format as input, convert with
+%% external_key(Key) if needed.
+-type foldfunc() :: fun(({Key::internal_key(),Value::term()},Acc::term) ->
+			       term()).
 
 -spec new(Name::atom()) -> table().
 new(Name) ->
@@ -43,6 +48,23 @@ new(Name) ->
 	{ok,_Pid} ->
 	    Name
     end.
+
+from_list(Name, List) ->
+    T = new(Name),
+    lists:foreach(
+      fun({K,V}) ->
+	      put(T, K, V)
+      end, List),
+    T.
+
+to_list(T) ->
+    to_list(T, "*").
+
+to_list(T, Match) ->
+    foldr_matching(T, Match,
+		   fun({K,V},Acc) ->
+			   [{binary_to_list(external_key(K)), V}|Acc]
+		   end, []).
 
 -spec delete(Name::atom()) -> true.
 delete(Name) when is_atom(Name) ->
@@ -53,23 +75,20 @@ insert(T, {Key, Value}) ->
     K = internal_key(Key),
     ets:insert(T, {K,Value,timestamp()}).
 
--spec lookup(Table::table(), Key::key()) -> [term()].
-lookup(Table, Key) ->
-    K = internal_key(Key),
-    case lookup_(Table, K) of
-	[] -> [];
-	[{K,Value}] -> [{external_key(K),Value}];
-	[{_K,Value}] -> [{Key,Value}]
-    end.
+-spec lookup(Table::table(), Key::key()) ->
+		    [{Key::key(),Value::term()}].
 
--spec lookup_(Table::table(), K::internal_key()) -> 
-		     [{K::internal_key(),Value::term()}].
-lookup_(Table, K) ->
+lookup(Table, K) when ?is_internal_key(K) ->
     case ets:lookup(Table,K) of
 	[{K,Value,_Ts}] ->
 	    [{K,Value}];
 	[] ->
 	    []
+    end;
+lookup(Table, Key) ->  %% external key, return external key
+    case ets:lookup(Table, internal_key(Key)) of
+	[] -> [];
+	[{_,Value,_Ts}] -> [{Key,Value}]
     end.
 
 -spec put(Table::table(), Key::key(),Value::term()) -> true.
@@ -78,8 +97,7 @@ put(T, Key, Val) ->
 
 -spec put(Table::table(), Key::key(),Value::term(),Ts::timestamp()) -> true.
 put(T, Key, Val, Ts) ->
-    K = internal_key(Key),
-    ets:insert(T, {K,Val,Ts}).
+    ets:insert(T, {internal_key(Key),Val,Ts}).
 
 -spec get(Table::table(), Key::key()) -> Value::term().
 get(T, Key) ->
@@ -95,12 +113,11 @@ get_ts(T, Key) ->
 	[{_,Val,Ts}] -> {Val,Ts}
     end.
 
--spec update_counter(Table::table(), Key::key(), Inc::term()) -> Value::term().
+-spec update_counter(Table::table(), Key::key(), Inc::term()) ->
+			    Value::term().
 update_counter(T, Key, I) ->
     K = internal_key(Key),
-    R = ets:update_counter(T, K, I),
-    ets:update_element(T, K, {3, timestamp()}),
-    R.
+    hd(ets:update_counter(T, K, [{2,I},{3,1,1,timestamp()}])).
 
 -spec update_timestamp(Table::table(), Key::key()) -> true.
 update_timestamp(T, Key) ->
@@ -199,33 +216,52 @@ is_sibling_(_, _, _) ->
     false.
 
 -spec fold_matching(Table::table(), Pattern::external_key(),
-		    Func::fun((Key::internal_key(),Value::term(),Acc::term) ->
-				  term()),
-		    Acc::term()) ->
-			   term().
+		    Fun::foldfunc(), Acc::term()) -> term().
 
 fold_matching(Table, Pattern, Func, Acc) ->
+    foldl_matching(Table, Pattern, Func, Acc).
+
+-spec foldl_matching(Table::table(), Pattern::external_key(),
+		     Fun::foldfunc(), Acc::term()) -> term().
+
+foldl_matching(Table, Pattern, Func, Acc) ->
     PatternKey = pattern_key(Pattern),
     Parent = fixed_prefix(PatternKey),
     Q = enql(Table,Parent,queue:new()),
     foldbl_(Table,
 	    fun(Elem={Key,_Value}, Acci) ->
-		    %% io:format("match ~p\n", [Key]),
-		    case match_keys(PatternKey, Key) of
+		    case match_ikeys(PatternKey, Key) of
+			true -> Func(Elem,Acci);
+			false -> Acci
+		    end
+	    end, Acc, Q).
+
+-spec foldr_matching(Table::table(), Pattern::external_key(),
+		     Fun::foldfunc(), Acc::term()) -> term().
+
+foldr_matching(Table, Pattern, Func, Acc) ->
+    PatternKey = pattern_key(Pattern),
+    Parent = fixed_prefix(PatternKey),
+    Q = enqr(Table,Parent,queue:new()),
+    foldbr_(Table,
+	    fun(Elem={Key,_Value}, Acci) ->
+		    case match_ikeys(PatternKey, Key) of
 			true -> Func(Elem,Acci);
 			false -> Acci
 		    end
 	    end, Acc, Q).
 
 %% depth first traversal
+-spec depth_first(Table::table(), Fun::foldfunc(), Acc::term()) -> term().
 depth_first(Table,Func,Acc) ->
     foldl(Table,Func,Acc).
 
+-spec breadth_first(Table::table(), Fun::foldfunc(), Acc::term()) -> term().
 breadth_first(Table,Func,Acc) ->
     foldbl(Table,Func,Acc).
     
 %% Fold over the tree depth first left to right
--spec foldl(table(), function(), term()) -> term().
+-spec foldl(Table::table(), Fun::foldfunc(), Acc::term()) -> term().
 
 foldl(Table,Func,Acc) ->
     foldl_(Table,Func,Acc,first(Table)).
@@ -238,7 +274,7 @@ foldl_(Table,Func,Acc,K) ->
     foldl_(Table,Func,Acc1,ets:next(Table,K)).
 
 %% Fold over the tree depth first right to left
--spec foldr(table(), function(), term()) -> term().
+-spec foldr(Table::table(), Fun::foldfunc(), Acc::term()) -> term().
 
 foldr(Table,Func,Acc) ->
     foldr_(Table,Func,Acc,last(Table)).
@@ -250,7 +286,9 @@ foldr_(Table,Func,Acc,K) ->
     Acc1 = Func(Elem,Acc),
     foldr_(Table,Func,Acc1,ets:prev(Table,K)).
 
-%% Fold over the tree bredth first left to right
+%% Fold over the tree breadth first left to right
+-spec foldbl(Table::table(), Fun::foldfunc(), Acc::term()) -> term().
+
 foldbl(Table,Func,Acc) ->
     Q = enql(Table,[],queue:new()),
     foldbl_(Table,Func,Acc,Q).
@@ -271,6 +309,8 @@ foldbl_(Table,Func,Acc,Q) ->
     end.
 
 %% Fold over the tree breadth first right to left
+-spec foldbr(Table::table(), Fun::foldfunc(), Acc::term()) -> term().
+
 foldbr(Table,Func,Acc) ->
     Q = enqr(Table,[],queue:new()),
     foldbr_(Table,Func,Acc,Q).
@@ -323,8 +363,10 @@ enqr_(Table,K,Q) ->
 %%    Key = external_key(element(Pos, Elem)),
 %%    setelement(Pos,Elem,Key).
 
-match_keys(Match, Key) ->
-    M = pattern_key(Match),
+-spec match_keys(Pattern::external_key(), Key::key()) ->
+			boolean().
+match_keys(Pattern, Key) ->
+    M = pattern_key(Pattern),
     K = internal_key(Key),
     match_ikeys(M, K).
 
@@ -334,14 +376,16 @@ match_ikeys(M, K) ->
 	R -> R
     end.
 
-match(['_'], _) -> true;
-match(['_'|Ms],Ks) -> match__(Ms,Ks);
+match(['*'], _) -> true;
+match(['*'|Ms],Ks) -> match__(Ms,Ks);
+match(['?'|Ms],[_|Ks]) -> match(Ms,Ks);
 match([K|Ms],[K|Ks]) -> match(Ms,Ks);
 match([_],[_]) -> false;
 match([],[]) -> true;
 match(_, _) -> fail.
 
-match_(['_'|Ms],Ks) -> match__(Ms,Ks);
+match_(['*'|Ms],Ks) -> match__(Ms,Ks);
+match_(['?'|Ms], Ks) -> match_(Ms, Ks);
 match_([K|Ms], Ks) ->
     case match_drop(K, Ks) of
 	false -> false;
@@ -352,8 +396,9 @@ match_(_, _) -> fail.
 
 match__(Ms,Ks) ->
     %% io:format("match__: ms=~w, ks=~w\n", [Ms,Ks]),
-    case lists:member('_', Ms) of
-	false -> lists:suffix(Ms, Ks);
+    case lists:member('*', Ms) orelse lists:member('?', Ms) of
+	false ->
+	    lists:suffix(Ms, Ks);
 	true ->
 	    case match_(Ms, Ks) of
 		fail when Ks =/= [] ->
@@ -399,7 +444,9 @@ internal_key(Name) when is_list(Name) ->
 ipath([P|Ps],Match) ->
     case binary:split(P,<<"[">>) of
 	[<<"*">>] when Match ->
-	    [ '_' | ipath(Ps,Match)];
+	    [ '*' | ipath(Ps,Match)];
+	[<<"?">>] when Match ->
+	    [ '?' | ipath(Ps,Match)];
 	[P= <<C,_/binary>>] when C >= $0, C =< $9 ->
 	    try bin_to_integer(P) of
 		I -> [I | ipath(Ps,Match)]
@@ -409,7 +456,7 @@ ipath([P|Ps],Match) ->
 	[P] -> %% existing atom?
 	    [ binary_to_atom(P, latin1) | ipath(Ps,Match) ];
 	[P1,<<"*]">>] when Match ->
-	    [ binary_to_atom(P1, latin1),'_' | ipath(Ps,Match) ]; 
+	    [ binary_to_atom(P1, latin1),'?' | ipath(Ps,Match) ];
 	[P1,Ix] ->
 	    case string:to_integer(binary_to_list(Ix)) of
 		{I, "]"} ->
@@ -442,7 +489,8 @@ join([A],_S) -> [A];
 join([A|As],S) -> [A,S|join(As,S)].
 
 %% get the fixed key pattern prefix if any
-fixed_prefix(['_'|_]) -> [];
+fixed_prefix(['*'|_]) -> [];
+fixed_prefix(['?'|_]) -> [];
 fixed_prefix([K|Ks]) -> [K|fixed_prefix(Ks)];
 fixed_prefix([]) -> [].
 
