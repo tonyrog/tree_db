@@ -415,8 +415,8 @@ match_drop(_K, []) -> false.
 %% Match keys are in the form of normal keys or:
 %% allow * in place of components
 %% "a.*.c"
-%% "a[*]"
-%% "a.b[2].*"
+%% "a.?"
+%% "a.b.2.*"
 %% convert a string or a binary into a internal key
 
 -spec pattern_key(Key::internal_key() | external_key()) ->
@@ -431,8 +431,8 @@ pattern_key(Name) when is_list(Name) ->
 %%
 %% External keys are in the form 
 %% "a.b.c"
-%% "a[2]"
-%% "a.b[2].c"
+%% "a.2"
+%% "a.b.2.c"
 %% convert a string or a binary into a internal key
 internal_key(Key) when ?is_internal_key(Key) ->
     Key;
@@ -442,28 +442,19 @@ internal_key(Name) when is_list(Name) ->
     ipath(binary:split(iolist_to_binary(Name),<<".">>,[global]),false).
 
 ipath([P|Ps],Match) ->
-    case binary:split(P,<<"[">>) of
-	[<<"*">>] when Match ->
+    case P of
+	<<"*">> when Match -> 
 	    [ '*' | ipath(Ps,Match)];
-	[<<"?">>] when Match ->
+	<<"?">> when Match ->
 	    [ '?' | ipath(Ps,Match)];
-	[P= <<C,_/binary>>] when C >= $0, C =< $9 ->
+	P = <<C,_/binary>> when C >= $0, C =< $9 ->
 	    try bin_to_integer(P) of
 		I -> [I | ipath(Ps,Match)]
 	    catch
 		error:_ -> error(bad_key)
 	    end;
-	[P] -> %% existing atom?
-	    [ binary_to_atom(P, latin1) | ipath(Ps,Match) ];
-	[P1,<<"*]">>] when Match ->
-	    [ binary_to_atom(P1, latin1),'?' | ipath(Ps,Match) ];
-	[P1,Ix] ->
-	    case string:to_integer(binary_to_list(Ix)) of
-		{I, "]"} ->
-		    [binary_to_atom(P1,latin1),I|ipath(Ps,Match)];
-		_ ->
-		    error(bad_index)
-	    end
+	P -> %% existing atom?
+	    [ binary_to_atom(P, latin1) | ipath(Ps,Match) ]
     end;
 ipath([],_Match) ->
     [].
@@ -475,8 +466,6 @@ external_key(Key) when ?is_internal_key(Key) ->
     iolist_to_binary(join(xpath(Key), $.)).
 
 %% convert to an extern id
-xpath([K,I|Ks]) when is_atom(K),is_integer(I) ->
-    [[atom_to_list(K),"[",integer_to_list(I),"]"] | xpath(Ks)];
 xpath([K|Ks]) when is_atom(K) ->
     [atom_to_list(K) | xpath(Ks)];
 xpath([I|Ks]) when is_integer(I) ->
