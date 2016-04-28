@@ -7,7 +7,7 @@
 
 -module(tree_db).
 
--export([new/1, lookup/2, insert/2, delete/1, delete/2,
+-export([new/1, lookup/2, insert/2, delete/1, delete/2, clear/1,
 	 first/1, last/1, next/2, prev/2,
 	 first_child/2, last_child/2, next_sibling/2, prev_sibling/2,
 	 foldl/3, foldr/3, foldbl/3, foldbr/3,
@@ -69,6 +69,10 @@ to_list(T, Match) ->
 -spec delete(Name::atom()) -> true.
 delete(Name) when is_atom(Name) ->
     tree_db_srv:stop(Name).
+
+-spec clear(Name::atom()) -> true.
+clear(Name) when is_atom(Name) ->
+    ets:delete_all_objects(Name).
 
 -spec insert(Table::table(), {Key::key(),Value::term()}) -> true.
 insert(T, {Key, Value}) ->
