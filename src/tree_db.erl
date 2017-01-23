@@ -20,6 +20,7 @@
 -export([enql/3, enqr/3]).
 -export([match_keys/2]).
 -export([internal_key/1, external_key/1, pattern_key/1]).
+-export([is_pattern_key/1]).
 
 -define(QUEUE_T(), term()).  %% R15 !
 
@@ -415,6 +416,29 @@ match_drop(K, [K|Ks]) -> Ks;
 match_drop(K, [_|Ks]) -> match_drop(K,Ks);
 match_drop(_K, []) -> false.
 
+%%
+%% @doc 
+%%    Check if key contains * or ? in the pattern
+%%
+-spec is_pattern_key(Key::internal_key() | external_key()) ->
+			    boolean().
+is_pattern_key(Key) when ?is_internal_key(Key) ->
+    is_pattern_ipath_(Key);
+is_pattern_key(Name) when is_binary(Name) ->
+    is_pattern_path_(binary:split(Name, <<".">>, [global]));
+is_pattern_key(Name) when is_list(Name) ->
+    is_pattern_path_(binary:split(iolist_to_binary(Name),<<".">>,[global])).
+
+is_pattern_ipath_(['*'|_]) -> true;
+is_pattern_ipath_(['?'|_]) -> true;
+is_pattern_ipath_([_|As]) -> is_pattern_ipath_(As);
+is_pattern_ipath_([]) -> false.
+
+is_pattern_path_([<<"*">>|_]) -> true;
+is_pattern_path_([<<"?">>|_]) -> true;
+is_pattern_path_([_|As]) -> is_pattern_path_(As);
+is_pattern_path_([]) -> false.
+    
 %%
 %% Match keys are in the form of normal keys or:
 %% allow * in place of components
