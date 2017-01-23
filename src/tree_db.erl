@@ -20,7 +20,7 @@
 -export([enql/3, enqr/3]).
 -export([match_keys/2]).
 -export([internal_key/1, external_key/1, pattern_key/1]).
--export([is_pattern_key/1]).
+-export([is_pattern_key/1, is_prefix_key/1]).
 
 -define(QUEUE_T(), term()).  %% R15 !
 
@@ -422,22 +422,34 @@ match_drop(_K, []) -> false.
 %%
 -spec is_pattern_key(Key::internal_key() | external_key()) ->
 			    boolean().
-is_pattern_key(Key) when ?is_internal_key(Key) ->
-    is_pattern_ipath_(Key);
-is_pattern_key(Name) when is_binary(Name) ->
-    is_pattern_path_(binary:split(Name, <<".">>, [global]));
-is_pattern_key(Name) when is_list(Name) ->
-    is_pattern_path_(binary:split(iolist_to_binary(Name),<<".">>,[global])).
 
-is_pattern_ipath_(['*'|_]) -> true;
-is_pattern_ipath_(['?'|_]) -> true;
-is_pattern_ipath_([_|As]) -> is_pattern_ipath_(As);
-is_pattern_ipath_([]) -> false.
+is_pattern_key(Key) ->
+    is_pattern_path(pattern_key(Key)).
 
-is_pattern_path_([<<"*">>|_]) -> true;
-is_pattern_path_([<<"?">>|_]) -> true;
-is_pattern_path_([_|As]) -> is_pattern_path_(As);
-is_pattern_path_([]) -> false.
+is_pattern_path(['*'|_]) -> true;
+is_pattern_path(['?'|_]) -> true;
+is_pattern_path([_|As]) -> is_pattern_path(As);
+is_pattern_path([]) -> false.
+
+%%
+%% @doc 
+%%    Check if key ends in * or ?
+%%
+-spec is_prefix_key(Key::internal_key() | external_key()) ->
+			   boolean().
+
+is_prefix_key(Key) ->
+    is_prefix_path(pattern_key(Key)).
+
+is_prefix_path([]) -> false;
+is_prefix_path(Key) -> is_prefix_path_(Key).
+    
+is_prefix_path_(['*']) -> true;
+is_prefix_path_(['?']) -> true;
+is_prefix_path_(['*'|_]) -> false;
+is_prefix_path_(['?'|_]) -> false;
+is_prefix_path_([_|As]) -> is_prefix_path_(As);
+is_prefix_path_([]) -> false.
     
 %%
 %% Match keys are in the form of normal keys or:
