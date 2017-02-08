@@ -121,7 +121,7 @@ get_ts(T, Key) ->
 			    Value::term().
 update_counter(T, Key, I) ->
     K = internal_key(Key),
-    hd(ets:update_counter(T, K, [{2,I},{3,1,1,timestamp()}])).
+    hd(ets:update_counter(T, K, [{2,I},{3,1,0,timestamp()}])).
 
 -spec update_timestamp(Table::table(), Key::key()) -> true.
 update_timestamp(T, Key) ->
