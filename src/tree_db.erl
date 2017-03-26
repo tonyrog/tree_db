@@ -16,6 +16,7 @@
 -export([update_counter/3, update_timestamp/2, update_timestamp/3]).
 -export([fold_matching/4, foldl_matching/4, foldr_matching/4]).
 -export([from_list/2, to_list/1, to_list/2]).
+-export([subscribe/3, publish/3]).
 
 -export([enql/3, enqr/3]).
 -export([match_keys/2]).
@@ -76,9 +77,11 @@ clear(Name) when is_atom(Name) ->
     ets:delete_all_objects(Name).
 
 -spec insert(Table::table(), {Key::key(),Value::term()}) -> true.
-insert(T, {Key, Value}) ->
-    K = internal_key(Key),
-    ets:insert(T, {K,Value,timestamp()}).
+insert(Table, {Key,Value}) ->
+    insert_(Table,internal_key(Key),Value).
+
+insert_(Table, Key, Value) ->
+    ets:insert(Table, {Key,Value,timestamp()}).
 
 -spec lookup(Table::table(), Key::key()) ->
 		    [{Key::key(),Value::term()}].
@@ -149,8 +152,10 @@ next(T,K) -> ets:next(T, internal_key(K)).
 prev(T,K) -> ets:prev(T, internal_key(K)).
 
 -spec first_child(table(), key()) -> internal_key() | eot().
-first_child(Table,Parent0) ->
-    Parent = internal_key(Parent0),
+first_child(Table,Parent) ->
+    first_child_(Table,internal_key(Parent)).
+
+first_child_(Table,Parent) ->
     case ets:next(Table, Parent) of
 	?eot -> ?eot;
 	Child ->
@@ -173,8 +178,10 @@ last_child(Table,Parent0) ->
     end.
 
 -spec next_sibling(table(), key()) -> internal_key() | eot().
-next_sibling(Table,Child0) ->
-    Child = internal_key(Child0),
+next_sibling(Table,Child) ->
+    next_sibling(Table,internal_key(Child)).
+
+next_sibling_(Table,Child) ->
     case ets:next(Table,Child++[?top]) of
 	?eot -> ?eot;
 	Child2 ->
@@ -356,6 +363,108 @@ enqr_(_Table,?eot,Q) ->
     Q;
 enqr_(Table,K,Q) ->
     enqr_(Table,prev_sibling(Table,K), queue:in(K, Q)).
+
+-spec subscribe(Table::table(),Pattern::key(),
+		CallbackOrPid::pid()|{atom(),atom()}|function()) ->
+		       true.
+
+subscribe(Table, Topic,CallbackOrPid) ->
+    Key = internal_key(Topic),
+    Key1 = Key++['$',erlang:unique_integer()],
+    insert_(Table,Key1,CallbackOrPid).
+
+-spec publish(Table::table(), Topic::key(), Value::term()) -> ok.
+
+publish(Table, Topic, Value) ->
+    Key = internal_key(Topic),
+    case Key of
+	[] ->
+	    publish_leaf_(Table,[],Key,Value);
+	_ ->
+	    Q = push_star_node(Table,[],[[]]),
+	    publish_pat_(Table,Key,Q,[],Key,Value)
+    end.
+
+%% Do breadth first search pattern scan
+publish_pat_(Table,[_],[],Q,Key,Value) ->
+    IN = lists:usort(Q),
+    lists:foreach(fun(Node) -> publish_leaf_(Table,Node,Key,Value) end, IN);
+publish_pat_(Table,[_|Ks],[],Q,Key,Value) ->
+    IN = lists:usort(Q),
+    publish_pat_(Table,Ks,IN,[],Key,Value);
+publish_pat_(Table,Ks0=[K|_],[N|IN],Q0,Key,Value) ->
+    Q1 = keep_star_node(N,Q0),
+    Q2 = push_key_node(Table,N,K,Q1),
+    Q3 = push_one_node(Table,N,Q2),
+    publish_pat_(Table,Ks0,IN,Q3,Key,Value).
+
+is_star_node(N) ->
+    case lists:reverse(N) of
+	['*'|_] -> true;
+	_ -> false
+    end.
+
+keep_star_node(N,Q) ->
+    case is_star_node(N) of
+	true -> [N|Q];
+	false -> Q
+    end.
+    
+%% walk possible zero transitions
+%% pattern: '*' ['*']*
+push_star_node(Table,N,Q) ->
+    N1 = N++['*'],
+    case first_child_(Table,N1) of
+	'$end_of_table' -> Q;
+	_ -> push_star_node(Table,N1,[N1|Q])
+    end.
+
+%% walk a key K and follow up with zero transitions
+%% pattern: K ['*']*
+push_key_node(Table,N,K,Q) ->
+    N1 = N++[K],
+    case first_child_(Table,N1) of
+	'$end_of_table' -> Q;
+	_ -> push_star_node(Table,N1,[N1|Q])
+    end.
+
+%% walk possible one nodes, and add possible zero transitions
+%% pattern: '?' ['*']*
+push_one_node(Table,N,Q) ->
+    N1 = N++['?'],
+    case first_child_(Table,N1) of
+	'$end_of_table' -> Q;
+	_ -> push_star_node(Table,N1,[N1|Q])
+    end.
+
+%% publish to subscribers that subscribe on the direct key
+publish_leaf_(Table,Node,Key,Value) ->
+    case first_child_(Table,Node++['$']) of
+	'$end_of_table' -> ok;
+	Child -> publish_leaf_list_(Table,Child,Key,Value)
+    end.
+
+%% traverse all subscribers 
+publish_leaf_list_(Table,Child,Key,Value) ->
+    case lists:reverse(Child) of
+	[N,'$'|Cs] when is_integer(N) ->
+	    Topic = lists:reverse(Cs),
+	    case lookup(Table,Child) of
+		[{_, Sub}] when is_pid(Sub) ->
+		    Sub ! {Topic,Key,Value};
+		[{_, Fun}] when is_function(Fun);
+				is_atom(element(1,Fun)),
+				is_atom(element(2,Fun)) ->
+		    apply(Fun,[Topic,Key,Value]);
+		[] -> ok
+	    end;
+	_ ->
+	    ok
+    end,
+    case next_sibling_(Table, Child) of
+	'$end_of_table' -> ok;
+	Next -> publish_leaf_list_(Table,Next,Key,Value)
+    end.
 
 
 %% Set key to it's internal form
