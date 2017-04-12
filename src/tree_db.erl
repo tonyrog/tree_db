@@ -16,18 +16,19 @@
 -export([update_counter/3, update_timestamp/2, update_timestamp/3]).
 -export([fold_matching/4, foldl_matching/4, foldr_matching/4]).
 -export([from_list/2, to_list/1, to_list/2]).
--export([subscribe/3, publish/3]).
+-export([subscribe/3, unsubscribe/3, publish/3, 
+	 fold_subscriptions/4, topic_name/1]).
 
 -export([enql/3, enqr/3]).
 -export([match_keys/2]).
--export([internal_key/1, external_key/1, pattern_key/1]).
+-export([internal_key/1, atom_key/1, external_key/1, pattern_key/1]).
+-export([append_key/2, append_key/1]).
 -export([is_pattern_key/1, is_prefix_key/1]).
 
 -define(QUEUE_T(), term()).  %% R15 !
 
 -define(eot, '$end_of_table').
 -define(top, <<>>).
--define(is_external_key(Key), is_binary((Key))).
 -define(is_internal_key(Key), (((Key) =:= []) 
 			       orelse 
 				 (is_list((Key)) andalso is_atom(hd((Key)))))).
@@ -179,7 +180,7 @@ last_child(Table,Parent0) ->
 
 -spec next_sibling(table(), key()) -> internal_key() | eot().
 next_sibling(Table,Child) ->
-    next_sibling(Table,internal_key(Child)).
+    next_sibling_(Table,internal_key(Child)).
 
 next_sibling_(Table,Child) ->
     case ets:next(Table,Child++[?top]) of
@@ -227,13 +228,13 @@ is_sibling_([H1], [H2|_], Parent) when H1 =/= H2 ->
 is_sibling_(_, _, _) ->
     false.
 
--spec fold_matching(Table::table(), Pattern::external_key(),
+-spec fold_matching(Table::table(), Pattern::key(),
 		    Fun::foldfunc(), Acc::term()) -> term().
 
 fold_matching(Table, Pattern, Func, Acc) ->
     foldl_matching(Table, Pattern, Func, Acc).
 
--spec foldl_matching(Table::table(), Pattern::external_key(),
+-spec foldl_matching(Table::table(), Pattern::key(),
 		     Fun::foldfunc(), Acc::term()) -> term().
 
 foldl_matching(Table, Pattern, Func, Acc) ->
@@ -248,7 +249,7 @@ foldl_matching(Table, Pattern, Func, Acc) ->
 		    end
 	    end, Acc, Q).
 
--spec foldr_matching(Table::table(), Pattern::external_key(),
+-spec foldr_matching(Table::table(), Pattern::key(),
 		     Fun::foldfunc(), Acc::term()) -> term().
 
 foldr_matching(Table, Pattern, Func, Acc) ->
@@ -365,38 +366,114 @@ enqr_(Table,K,Q) ->
     enqr_(Table,prev_sibling(Table,K), queue:in(K, Q)).
 
 -spec subscribe(Table::table(),Pattern::key(),
-		CallbackOrPid::pid()|{atom(),atom()}|function()) ->
+		Handler::pid()|{atom(),atom()}|function()) ->
 		       true.
 
-subscribe(Table, Topic,CallbackOrPid) ->
+subscribe(Table, Topic, Handler) ->
     Key = internal_key(Topic),
     Key1 = Key++['$',erlang:unique_integer()],
-    insert_(Table,Key1,CallbackOrPid).
+    insert_(Table,Key1,Handler).
+
+-spec unsubscribe(Table::table(),Pattern::key(),Handler::pid()) ->
+			 boolean().
+
+unsubscribe(Table, Topic, Handler) ->
+    Node = internal_key(Topic),
+    case first_child_(Table,Node++['$']) of
+	'$end_of_table' -> false;
+	Child ->
+	    case list_leafs__(Table,Child,Handler,[]) of
+		[] -> false;
+		List ->
+		    lists:foreach(fun(Key) -> ets:delete(Table, Key) end, List),
+		    true
+	    end
+    end.
+
+list_leafs__(Table,Child,Handler,Acc) ->
+    Acc1 = case lists:reverse(Child) of
+	       [N,'$'|_Cs] when is_integer(N) ->
+		   case ets:lookup(Table,Child) of
+		       [{_,{Handler,_},_TimeStamp}] ->
+			   [Child|Acc];
+		       [] ->
+			   Acc
+		   end;
+	       _ ->
+		   Acc
+	   end,
+    case next_sibling_(Table, Child) of
+	'$end_of_table' -> Acc1;
+	Next -> list_leafs__(Table,Next,Handler,Acc)
+    end.    
 
 -spec publish(Table::table(), Topic::key(), Value::term()) -> ok.
 
 publish(Table, Topic, Value) ->
     Key = internal_key(Topic),
-    case Key of
-	[] ->
-	    publish_leaf_(Table,[],Key,Value);
-	_ ->
+    fold_subscriptions(
+      fun(TopicKey,Handler,_TimeStamp,Acc) ->
+	      case Handler of
+		  Sub when is_pid(Sub) ->
+		      Sub ! {TopicKey,Key,Value};
+		  Fun when is_function(Fun);
+			   is_atom(element(1,Fun)),
+			   is_atom(element(2,Fun)) ->
+		      apply(Fun,[TopicKey,Key,Value])
+	      end,
+	      Acc
+      end, ok, Table, Topic).
+
+fold_subscriptions(Fun, Acc, Table, Topic) ->
+    case internal_key(Topic) of
+	[] -> fold_leafs_(Fun, Acc,Table,[[]]);
+	Key -> 
 	    Q = push_star_node(Table,[],[[]]),
-	    publish_pat_(Table,Key,Q,[],Key,Value)
+	    fold_pat_(Fun,Acc,Table,Key,Q,[])
     end.
 
-%% Do breadth first search pattern scan
-publish_pat_(Table,[_],[],Q,Key,Value) ->
-    IN = lists:usort(Q),
-    lists:foreach(fun(Node) -> publish_leaf_(Table,Node,Key,Value) end, IN);
-publish_pat_(Table,[_|Ks],[],Q,Key,Value) ->
-    IN = lists:usort(Q),
-    publish_pat_(Table,Ks,IN,[],Key,Value);
-publish_pat_(Table,Ks0=[K|_],[N|IN],Q0,Key,Value) ->
+fold_pat_(Fun,Acc,Table,[_],[],Q) ->
+    fold_leafs_(Fun,Acc,Table,lists:usort(Q));
+fold_pat_(Fun,Acc,Table,[_|Ks],[],Q) ->
+    fold_pat_(Fun,Acc,Table,Ks,lists:usort(Q),[]);
+fold_pat_(Fun,Acc,Table,Ks0=[K|_],[N|IN],Q0) ->
     Q1 = keep_star_node(N,Q0),
     Q2 = push_key_node(Table,N,K,Q1),
     Q3 = push_one_node(Table,N,Q2),
-    publish_pat_(Table,Ks0,IN,Q3,Key,Value).
+    fold_pat_(Fun,Acc,Table,Ks0,IN,Q3).
+
+fold_leafs_(Fun,Acc,Table,[Node|Ns]) ->
+    case first_child_(Table,Node++['$']) of
+	'$end_of_table' -> fold_leafs_(Fun,Acc,Table,Ns);
+	Child -> 
+	    Acc1 = fold_leafs__(Fun,Acc,Table,Child),
+	    fold_leafs_(Fun,Acc1,Table,Ns)
+    end;
+fold_leafs_(_Fun,Acc,_Table,[]) ->
+    Acc.
+
+%% traverse all subscribers 
+fold_leafs__(Fun,Acc,Table,Child) ->
+    Acc1 = case lists:reverse(Child) of
+	       [N,'$'|Cs] when is_integer(N) ->
+		   Topic = lists:reverse(Cs),
+		   case ets:lookup(Table,Child) of
+		       [{_,Value,TimeStamp}] ->
+			   Fun(Topic,Value,TimeStamp,Acc);
+		       [] ->
+			   Acc
+		   end;
+	       _ ->
+		   Acc
+	   end,
+    case next_sibling_(Table, Child) of
+	'$end_of_table' -> Acc1;
+	Next -> fold_leafs__(Fun,Acc,Table,Next)
+    end.
+
+topic_name(Node) ->
+    [_N,'$'|Cs] = lists:reverse(Node),
+    external_key(lists:reverse(Cs)).
 
 is_star_node(N) ->
     case lists:reverse(N) of
@@ -437,47 +514,7 @@ push_one_node(Table,N,Q) ->
 	_ -> push_star_node(Table,N1,[N1|Q])
     end.
 
-%% publish to subscribers that subscribe on the direct key
-publish_leaf_(Table,Node,Key,Value) ->
-    case first_child_(Table,Node++['$']) of
-	'$end_of_table' -> ok;
-	Child -> publish_leaf_list_(Table,Child,Key,Value)
-    end.
-
-%% traverse all subscribers 
-publish_leaf_list_(Table,Child,Key,Value) ->
-    case lists:reverse(Child) of
-	[N,'$'|Cs] when is_integer(N) ->
-	    Topic = lists:reverse(Cs),
-	    case lookup(Table,Child) of
-		[{_, Sub}] when is_pid(Sub) ->
-		    Sub ! {Topic,Key,Value};
-		[{_, Fun}] when is_function(Fun);
-				is_atom(element(1,Fun)),
-				is_atom(element(2,Fun)) ->
-		    apply(Fun,[Topic,Key,Value]);
-		[] -> ok
-	    end;
-	_ ->
-	    ok
-    end,
-    case next_sibling_(Table, Child) of
-	'$end_of_table' -> ok;
-	Next -> publish_leaf_list_(Table,Next,Key,Value)
-    end.
-
-
-%% Set key to it's internal form
-%% to_internal(Pos,Elem) ->
-%%    Key = internal_key(element(Pos, Elem)),
-%%    setelement(Pos,Elem,Key).
-
-%% Set key to it's external form
-%% to_external(Pos,Elem) ->
-%%    Key = external_key(element(Pos, Elem)),
-%%    setelement(Pos,Elem,Key).
-
--spec match_keys(Pattern::external_key(), Key::key()) ->
+-spec match_keys(Pattern::key(), Key::key()) ->
 			boolean().
 match_keys(Pattern, Key) ->
     M = pattern_key(Pattern),
@@ -529,8 +566,7 @@ match_drop(_K, []) -> false.
 %% @doc 
 %%    Check if key contains * or ? in the pattern
 %%
--spec is_pattern_key(Key::internal_key() | external_key()) ->
-			    boolean().
+-spec is_pattern_key(Key::key()) -> boolean().
 
 is_pattern_key(Key) ->
     is_pattern_path(pattern_key(Key)).
@@ -544,8 +580,7 @@ is_pattern_path([]) -> false.
 %% @doc 
 %%    Check if key ends in * or ?
 %%
--spec is_prefix_key(Key::internal_key() | external_key()) ->
-			   boolean().
+-spec is_prefix_key(Key::key()) -> boolean().
 
 is_prefix_key(Key) ->
     is_prefix_path(pattern_key(Key)).
@@ -568,14 +603,14 @@ is_prefix_path_([]) -> false.
 %% "a.b.2.*"
 %% convert a string or a binary into a internal key
 
--spec pattern_key(Key::internal_key() | external_key()) ->
-			 pattern_key().
+-spec pattern_key(Key::key()) -> pattern_key().
+
 pattern_key(Key) when ?is_internal_key(Key) ->
     Key;
 pattern_key(Name) when is_binary(Name) ->
-    ipath(binary:split(Name, <<".">>, [global]),true);
+    ipath(binary:split(Name, <<".">>, [global]));
 pattern_key(Name) when is_list(Name) ->
-    ipath(binary:split(iolist_to_binary(Name),<<".">>,[global]),true).
+    ipath(binary:split(iolist_to_binary(Name),<<".">>,[global])).
 
 %%
 %% External keys are in the form 
@@ -583,29 +618,37 @@ pattern_key(Name) when is_list(Name) ->
 %% "a.2"
 %% "a.b.2.c"
 %% convert a string or a binary into a internal key
+
+-spec internal_key(Key::key()) -> internal_key().
+
 internal_key(Key) when ?is_internal_key(Key) ->
     Key;
 internal_key(Name) when is_binary(Name) ->
-    ipath(binary:split(Name, <<".">>, [global]),false);
+    ipath(binary:split(Name, <<".">>, [global]));
 internal_key(Name) when is_list(Name) ->
-    ipath(binary:split(iolist_to_binary(Name),<<".">>,[global]),false).
+    ipath(binary:split(iolist_to_binary(Name),<<".">>,[global])).
 
-ipath([P|Ps],Match) ->
+-spec atom_key(Key::key()) -> internal_key().
+
+atom_key(Key) ->
+    internal_key(Key).
+
+ipath([P|Ps]) ->
     case P of
-	<<"*">> when Match -> 
-	    [ '*' | ipath(Ps,Match)];
-	<<"?">> when Match ->
-	    [ '?' | ipath(Ps,Match)];
+	<<"*">> ->
+	    [ '*' | ipath(Ps)];
+	<<"?">> ->
+	    [ '?' | ipath(Ps)];
 	P = <<C,_/binary>> when C >= $0, C =< $9 ->
 	    try bin_to_integer(P) of
-		I -> [I | ipath(Ps,Match)]
+		I -> [I | ipath(Ps)]
 	    catch
 		error:_ -> error(bad_key)
 	    end;
 	P -> %% existing atom?
-	    [ binary_to_atom(P, latin1) | ipath(Ps,Match) ]
+	    [ binary_to_atom(P, latin1) | ipath(Ps) ]
     end;
-ipath([],_Match) ->
+ipath([]) ->
     [].
 
 bin_to_integer(Bin) -> %% R15 support
@@ -621,6 +664,19 @@ xpath([I|Ks]) when is_integer(I) ->
     [integer_to_list(I)|xpath(Ks)];
 xpath([]) ->
     [].
+
+%% append keys and return internal key
+-spec append_key(Key1::key(), Key2::key()) -> internal_key().
+
+append_key(Key1, Key2) ->
+    internal_key(Key1) ++ internal_key(Key2).
+
+-spec append_key([Key::key()]) -> internal_key().
+
+append_key(Keys) when is_list(Keys) ->
+    lists:append([internal_key(K) || K <- Keys]).
+
+-spec join(List::[term()], Separator::term()) -> [term()].
 
 join([],_S) -> [];
 join([A],_S) -> [A];
