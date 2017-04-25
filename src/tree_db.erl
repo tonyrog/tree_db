@@ -387,7 +387,7 @@ enqr_(Table,K,Q) ->
 
 subscribe(Table, Topic, Handler) ->
     Key = internal_key(Topic),
-    Key1 = Key++['$',erlang:unique_integer()],
+    Key1 = Key++['$',unique()],
     insert_(Table,Key1,Handler).
 
 -spec unsubscribe(Table::table(),Pattern::key(),Handler::pid()) ->
@@ -712,5 +712,13 @@ timestamp() ->
     catch
 	error:undef ->
 	    {MS,S,US} = os:timestamp(),
+	    (MS*1000000+S)*1000000+US
+    end.
+
+unique() ->
+    try erlang:unique_integer()
+    catch
+	error:undef ->
+	    {MS,S,US} = apply(erlang,now,[]),
 	    (MS*1000000+S)*1000000+US
     end.
