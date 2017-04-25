@@ -184,7 +184,7 @@ last_child(Table,Parent0) ->
 
 -spec next_sibling(table(), key()) -> internal_key() | eot().
 next_sibling(Table,Child) ->
-    next_sibling(Table,internal_key(Child)).
+    next_sibling_(Table,internal_key(Child)).
 
 next_sibling_(Table,Child) ->
     case ets:next(Table,Child++[?top]) of
