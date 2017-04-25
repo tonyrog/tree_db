@@ -6,7 +6,7 @@ in a tree like way.
 A key consist of a list of atoms and integers where integer are
 normally used as array index.
 
-An external representation is for example a.b[1].c.d for the internal
+An external representation is for example a.b.1.c.d for the internal
 key [a,b,1,c,d].
 This storage makes it easy to group related data into trees that may
 be traversed over children and siblings.

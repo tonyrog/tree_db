@@ -37,6 +37,7 @@
 %% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
 %% @end
 %%--------------------------------------------------------------------
+
 start(Name) when is_atom(Name) ->
     gen_server:start_link({local, Name}, ?MODULE, [Name], []).
 

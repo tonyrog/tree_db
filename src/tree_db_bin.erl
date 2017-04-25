@@ -1,11 +1,11 @@
 %%% @author Tony Rogvall <tony@rogvall.se>
 %%% @copyright (C) 2015, Tony Rogvall
 %%% @doc
-%%%    Tree data base
+%%%    Tree data base (binary version)
 %%% @end
 %%% Created : 19 Oct 2015 by Tony Rogvall <tony@rogvall.se>
 
--module(tree_db).
+-module(tree_db_bin).
 
 -export([new/1, lookup/2, insert/2, delete/1, delete/2, clear/1,
 	 first/1, last/1, next/2, prev/2,
@@ -24,19 +24,23 @@
 -export([internal_key/1, atom_key/1, external_key/1, pattern_key/1]).
 -export([append_key/2, append_key/1]).
 -export([is_pattern_key/1, is_prefix_key/1]).
+-export([timestamp/0]).
 
 -define(QUEUE_T(), term()).  %% R15 !
 
 -define(eot, '$end_of_table').
--define(top, <<>>).
--define(is_internal_key(Key), (((Key) =:= []) 
-			       orelse 
-				 (is_list((Key)) andalso is_atom(hd((Key)))))).
+-define(top, <<"~">>).
+-define(is_internal_key(Key),
+	(((Key) =:= []) 
+	 orelse 
+	   (is_list((Key)) andalso 
+			     (is_binary(hd((Key))) orelse is_atom(hd((Key))))
+	   ))).
 
 -type eot() :: '$end_of_table'.
--type internal_key() :: [atom()|integer()].
--type external_key() :: binary() | string().
--type pattern_key()  :: [atom()|integer()|'*'|'?'].
+-type internal_key() :: [binary()|atom()|integer()].
+-type external_key() :: binary()|string().
+-type pattern_key()  :: [binary()|integer()|'*'|'?'].
 -type key() :: internal_key() | external_key().
 -type table() :: term().
 -type timestamp() :: integer().
@@ -180,7 +184,7 @@ last_child(Table,Parent0) ->
 
 -spec next_sibling(table(), key()) -> internal_key() | eot().
 next_sibling(Table,Child) ->
-    next_sibling_(Table,internal_key(Child)).
+    next_sibling(Table,internal_key(Child)).
 
 next_sibling_(Table,Child) ->
     case ets:next(Table,Child++[?top]) of
@@ -394,8 +398,10 @@ list_leafs__(Table,Child,Handler,Acc) ->
     Acc1 = case lists:reverse(Child) of
 	       [N,'$'|_Cs] when is_integer(N) ->
 		   case ets:lookup(Table,Child) of
-		       [{_,{Handler,_},_TimeStamp}] ->
+		       [{_,Handler,_TimeStamp}] ->
 			   [Child|Acc];
+		       [{_,_Other,_TimeStamp}] ->
+			   Acc;
 		       [] ->
 			   Acc
 		   end;
@@ -618,9 +624,6 @@ pattern_key(Name) when is_list(Name) ->
 %% "a.2"
 %% "a.b.2.c"
 %% convert a string or a binary into a internal key
-
--spec internal_key(Key::key()) -> internal_key().
-
 internal_key(Key) when ?is_internal_key(Key) ->
     Key;
 internal_key(Name) when is_binary(Name) ->
@@ -631,11 +634,14 @@ internal_key(Name) when is_list(Name) ->
 -spec atom_key(Key::key()) -> internal_key().
 
 atom_key(Key) ->
-    internal_key(Key).
+    [if is_atom(X) -> X;
+	is_integer(X) -> X;
+	is_binary(X) -> binary_to_atom(X, latin1)
+     end || X <- internal_key(Key)].
 
 ipath([P|Ps]) ->
     case P of
-	<<"*">> ->
+	<<"*">> -> 
 	    [ '*' | ipath(Ps)];
 	<<"?">> ->
 	    [ '?' | ipath(Ps)];
@@ -645,8 +651,8 @@ ipath([P|Ps]) ->
 	    catch
 		error:_ -> error(bad_key)
 	    end;
-	P -> %% existing atom?
-	    [ binary_to_atom(P, latin1) | ipath(Ps) ]
+	P ->
+	    [ P | ipath(Ps) ]
     end;
 ipath([]) ->
     [].
@@ -662,6 +668,8 @@ xpath([K|Ks]) when is_atom(K) ->
     [atom_to_list(K) | xpath(Ks)];
 xpath([I|Ks]) when is_integer(I) ->
     [integer_to_list(I)|xpath(Ks)];
+xpath([B|Ks]) when is_binary(B) ->
+    [binary_to_list(B)|xpath(Ks)];
 xpath([]) ->
     [].
 

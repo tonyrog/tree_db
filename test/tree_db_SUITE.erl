@@ -20,7 +20,7 @@
 suite() -> [].
 
 all() -> 
-    [match_success, match_failure].
+    [tree, match_success, match_failure, pubsub].
 
 %%--------------------------------------------------------------------
 %%
@@ -128,12 +128,23 @@ all(doc) ->
     ["Describe the main purpose of this suite"];
 
 all(suite) -> 
-    [match_success, match_failure].
+    [tree, match_success, match_failure, pubsub].
 
 
 %%--------------------------------------------------------------------
 %% TEST CASES
 %%--------------------------------------------------------------------
+
+tree(doc) ->
+    ["Test basic tree properties"];
+tree(suite) -> [];
+tree(Config) when is_list(Config) ->
+    ?line T = tree_db:insert(test_t, [{"a.b.x", 1}, {"a.b.y", 2}, {"a.b.z", 3}, {"b.c.x", 4}]),
+    ?line = [{[b,c,x],4}] = tree_db:foldl_matching(tree, "b.c.*", fun(E,A) -> [E|A] end, []),
+    ?line [{[a,b,x],1},{[a,b,y],2},{[a,b,z],3}] = lists:sort(tree_db:foldl_matching(tree, "a.b.?", fun(E,A) -> [E|A] end, [])),
+    ok.
+
+
 
 match_success(doc) ->
     ["A number of sucessful matches"];
@@ -144,8 +155,8 @@ match_success(Config) when is_list(Config) ->
     ?line true = tree_db:match_keys("*.c", "a.b.c.a.b.c.a.b.c"),
     ?line true = tree_db:match_keys("a.*.c", "a.b.c.a.b.c.a.b.c"),
     ?line true = tree_db:match_keys("a.*.a.b.*.c", "a.b.c.a.b.c.a.b.c"),
-    ?line true = tree_db:match_keys("a.b[*].c.d[*]", "a.b.2.c.d.3"),
-    ?line true = tree_db:match_keys("a.b[2].c.d[*]", "a.b.2.c.d.3"),
+    ?line true = tree_db:match_keys("a.b.*.c.d.*", "a.b.2.c.d.3"),
+    ?line true = tree_db:match_keys("a.b.2.c.d.*", "a.b.2.c.d.3"),
     ok.
 
 match_failure(doc) ->
@@ -157,6 +168,31 @@ match_failure(Config) when is_list(Config) ->
     ?line false = tree_db:match_keys("*.a.c.*", "a.b.c.a.b.c.a.b.c"),
     ?line false = tree_db:match_keys("*.a.b.a.*.c", "a.b.c.a.b.c.a.b.c"),
     ok.
+
+pubsub(doc) ->
+    ["Test pubsub patterns"];
+pubsub(suite) -> [];
+pubsub(Config) when is_list(Config) ->
+    T = tree_db:new(test_a),
+    ?line true = tree_db:subscribe(T, "*.b", fun callback/3),
+    ?line true = tree_db:subscribe(T, "*.a", fun callback/3),
+    ?line true = tree_db:subscribe(T, "a.*", fun callback/3),
+    ?line true = tree_db:subscribe(T, "a.b", fun callback/3),
+    ?line true = tree_db:subscribe(T, "b.a", fun callback/3),
+    ?line true = tree_db:subscribe(T, "a.b.c", fun callback/3),
+    ?line true = tree_db:subscribe(T, "a.?.c", fun callback/3),
+    %%
+    put(tree_db:internal_key("*.b"), 0),
+    put(tree_db:internal_key("a.b"), 0),
+    put(tree_db:internal_key("a.*"), 0),
+    tree_db:publish(T, "a.b", 123),
+    ?line 1 = get(tree_db:internal_key("*.b")),
+    ?line 1 = get(tree_db:internal_key("a.*")),
+    ?line 1 = get(tree_db:internal_key("a.b")),
+    ok.
+
+callback(Topic,_Key,_Value) ->
+    put(Topic, get(Topic)+1).
 
 %%--------------------------------------------------------------------
 %% @doc
