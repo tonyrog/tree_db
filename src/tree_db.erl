@@ -24,6 +24,8 @@
 -export([internal_key/1, atom_key/1, external_key/1, pattern_key/1]).
 -export([append_key/2, append_key/1]).
 -export([is_pattern_key/1, is_prefix_key/1]).
+-export([fixed_prefix/1]).
+-export([timestamp/0]).
 
 -define(QUEUE_T(), term()).  %% R15 !
 
@@ -239,30 +241,44 @@ fold_matching(Table, Pattern, Func, Acc) ->
 
 foldl_matching(Table, Pattern, Func, Acc) ->
     PatternKey = pattern_key(Pattern),
-    Parent = fixed_prefix(PatternKey),
-    Q = enql(Table,Parent,queue:new()),
-    foldbl_(Table,
-	    fun(Elem={Key,_Value}, Acci) ->
-		    case match_ikeys(PatternKey, Key) of
-			true -> Func(Elem,Acci);
-			false -> Acci
-		    end
-	    end, Acc, Q).
+    case fixed_prefix_(PatternKey) of
+	PatternKey -> %% plain key
+	    case lookup(Table, PatternKey) of
+		[Elem={_Key,_Value}] -> Func(Elem,Acc);
+		[] -> []
+	    end;	
+	Parent ->
+	    Q = enql(Table,Parent,queue:new()),
+	    foldbl_(Table,
+		    fun(Elem={Key,_Value}, Acci) ->
+			    case match_ikeys(PatternKey, Key) of
+				true -> Func(Elem,Acci);
+				false -> Acci
+			    end
+		    end, Acc, Q)
+    end.
 
 -spec foldr_matching(Table::table(), Pattern::key(),
 		     Fun::foldfunc(), Acc::term()) -> term().
 
 foldr_matching(Table, Pattern, Func, Acc) ->
     PatternKey = pattern_key(Pattern),
-    Parent = fixed_prefix(PatternKey),
-    Q = enqr(Table,Parent,queue:new()),
-    foldbr_(Table,
-	    fun(Elem={Key,_Value}, Acci) ->
-		    case match_ikeys(PatternKey, Key) of
-			true -> Func(Elem,Acci);
-			false -> Acci
-		    end
-	    end, Acc, Q).
+    case fixed_prefix_(PatternKey) of
+	PatternKey -> %% plain key
+	    case lookup(Table, PatternKey) of
+		[Elem={_Key,_Value}] -> Func(Elem,Acc);
+		[] -> []
+	    end;	
+	Parent ->
+	    Q = enqr(Table,Parent,queue:new()),
+	    foldbr_(Table,
+		    fun(Elem={Key,_Value}, Acci) ->
+			    case match_ikeys(PatternKey, Key) of
+				true -> Func(Elem,Acci);
+				false -> Acci
+			    end
+		    end, Acc, Q)
+    end.
 
 %% depth first traversal
 -spec depth_first(Table::table(), Fun::foldfunc(), Acc::term()) -> term().
@@ -683,10 +699,13 @@ join([A],_S) -> [A];
 join([A|As],S) -> [A,S|join(As,S)].
 
 %% get the fixed key pattern prefix if any
-fixed_prefix(['*'|_]) -> [];
-fixed_prefix(['?'|_]) -> [];
-fixed_prefix([K|Ks]) -> [K|fixed_prefix(Ks)];
-fixed_prefix([]) -> [].
+fixed_prefix(PatternKey) ->
+    fixed_prefix_(pattern_key(PatternKey)).
+
+fixed_prefix_(['*'|_]) -> [];
+fixed_prefix_(['?'|_]) -> [];
+fixed_prefix_([K|Ks]) -> [K|fixed_prefix_(Ks)];
+fixed_prefix_([]) -> [].
 
 timestamp() ->
     try erlang:system_time(micro_seconds)
