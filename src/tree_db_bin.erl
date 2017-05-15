@@ -7,7 +7,7 @@
 
 -module(tree_db_bin).
 
--export([new/1, lookup/2, insert/2, delete/1, delete/2, clear/1,
+-export([new/1, lookup/2, lookup_ts/2, insert/2, delete/1, delete/2, clear/1,
 	 first/1, last/1, next/2, prev/2,
 	 first_child/2, last_child/2, next_sibling/2, prev_sibling/2,
 	 foldl/3, foldr/3, foldbl/3, foldbr/3,
