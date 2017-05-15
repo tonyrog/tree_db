@@ -11,10 +11,12 @@
 	 first/1, last/1, next/2, prev/2,
 	 first_child/2, last_child/2, next_sibling/2, prev_sibling/2,
 	 foldl/3, foldr/3, foldbl/3, foldbr/3,
+	 foldbl_ts/3,
 	 depth_first/3, breadth_first/3]).
 -export([put/3, put/4, get/2, get_ts/2]).
 -export([update_counter/3, update_timestamp/2, update_timestamp/3]).
 -export([fold_matching/4, foldl_matching/4, foldr_matching/4]).
+-export([fold_matching_ts/4, foldl_matching_ts/4]).
 -export([from_list/2, to_list/1, to_list/2]).
 -export([subscribe/3, unsubscribe/3, publish/3, 
 	 fold_subscriptions/4, topic_name/1]).
@@ -49,6 +51,9 @@
 %% external_key(Key) if needed.
 -type foldfunc() :: fun(({Key::internal_key(),Value::term()},Acc::term) ->
 			       term()).
+-type foldfunc_ts() :: fun(({Key::internal_key(),Value::term(),
+			     TimeStamp::timestamp()},Acc::term) ->
+				  term()).
 
 -spec new(Name::atom()) -> table().
 new(Name) ->
@@ -104,6 +109,14 @@ lookup(Table, Key) ->  %% external key, return external key
 	[] -> [];
 	[{_,Value,_Ts}] -> [{Key,Value}]
     end.
+
+-spec lookup_ts(Table::table(), Key::key()) ->
+		       [{Key::key(),Value::term(),TimeStamp::timestamp()}].
+
+lookup_ts(Table, K) when ?is_internal_key(K) ->
+    ets:lookup(Table,K);
+lookup_ts(Table, Key) ->  %% external key, return external key
+    ets:lookup(Table, internal_key(Key)).
 
 -spec put(Table::table(), Key::key(),Value::term()) -> true.
 put(T, Key, Val) ->
@@ -236,29 +249,57 @@ is_sibling_(_, _, _) ->
 -spec fold_matching(Table::table(), Pattern::key(),
 		    Fun::foldfunc(), Acc::term()) -> term().
 
-fold_matching(Table, Pattern, Func, Acc) ->
-    foldl_matching(Table, Pattern, Func, Acc).
+fold_matching(Table, Pattern, Fun, Acc) ->
+    foldl_matching(Table, Pattern, Fun, Acc).
 
 -spec foldl_matching(Table::table(), Pattern::key(),
 		     Fun::foldfunc(), Acc::term()) -> term().
 
-foldl_matching(Table, Pattern, Func, Acc) ->
+foldl_matching(Table, Pattern, Fun, Acc) ->
     PatternKey = pattern_key(Pattern),
     case fixed_prefix_(PatternKey) of
 	PatternKey -> %% plain key
 	    case lookup(Table, PatternKey) of
-		[Elem={_Key,_Value}] -> Func(Elem,Acc);
-		[] -> []
+		[Elem={_Key,_Value}] -> Fun(Elem,Acc);
+		[] -> Acc
 	    end;
 	Parent ->
 	    Q = enql(Table,Parent,queue:new()),
 	    foldbl_(Table,
 		    fun(Elem={Key,_Value}, Acci) ->
 			    case match_ikeys(PatternKey, Key) of
-				true -> Func(Elem,Acci);
+				true -> Fun(Elem,Acci);
 				false -> Acci
 			    end
 		    end, Acc, Q)
+    end.
+
+-spec fold_matching_ts(Table::table(), Pattern::key(),
+		       Fun::foldfunc_ts(), Acc::term()) -> term().
+
+fold_matching_ts(Table, Pattern, Fun, Acc) ->
+    foldl_matching_ts(Table, Pattern, Fun, Acc).
+
+-spec foldl_matching_ts(Table::table(), Pattern::key(),
+			Fun::foldfunc_ts(), Acc::term()) -> term().
+
+foldl_matching_ts(Table, Pattern, Fun, Acc) ->
+    PatternKey = pattern_key(Pattern),
+    case fixed_prefix_(PatternKey) of
+	PatternKey -> %% plain key
+	    case lookup_ts(Table, PatternKey) of
+		[Elem] -> Fun(Elem,Acc);
+		[] -> Acc
+	    end;
+	Parent ->
+	    Q = enql(Table,Parent,queue:new()),
+	    foldbl_ts_(Table,
+		       fun(Elem={Key,_Value,_TimeStamp}, Acci) ->
+			       case match_ikeys(PatternKey, Key) of
+				   true -> Fun(Elem,Acci);
+				   false -> Acci
+			       end
+		       end, Acc, Q)
     end.
 
 -spec foldr_matching(Table::table(), Pattern::key(),
@@ -270,7 +311,7 @@ foldr_matching(Table, Pattern, Func, Acc) ->
 	PatternKey -> %% plain key
 	    case lookup(Table, PatternKey) of
 		[Elem={_Key,_Value}] -> Func(Elem,Acc);
-		[] -> []
+		[] -> Acc
 	    end;
 	Parent ->
 	    Q = enqr(Table,Parent,queue:new()),
@@ -335,6 +376,28 @@ foldbl_(Table,Func,Acc,Q) ->
 		    foldbl_(Table,Func,Acc1,Q2);
 		[] ->
 		    foldbl_(Table,Func,Acc,Q2)
+	    end;
+	{empty,_Q1} ->
+	    Acc
+    end.
+
+%% Fold over the tree breadth first left to right
+-spec foldbl_ts(Table::table(), Fun::foldfunc(), Acc::term()) -> term().
+
+foldbl_ts(Table,Func,Acc) ->
+    Q = enql(Table,[],queue:new()),
+    foldbl_ts_(Table,Func,Acc,Q).
+
+foldbl_ts_(Table,Func,Acc,Q) ->
+    case queue:out(Q) of
+	{{value,K},Q1} ->
+	    Q2 = enql(Table,K,Q1),
+	    case lookup_ts(Table,K) of
+		[Elem] ->
+		    Acc1 = Func(Elem,Acc),
+		    foldbl_ts_(Table,Func,Acc1,Q2);
+		[] ->
+		    foldbl_ts_(Table,Func,Acc,Q2)
 	    end;
 	{empty,_Q1} ->
 	    Acc
