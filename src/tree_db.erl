@@ -16,7 +16,7 @@
 -export([update_counter/3, update_timestamp/2, update_timestamp/3]).
 -export([fold_matching/4, foldl_matching/4, foldr_matching/4]).
 -export([from_list/2, to_list/1, to_list/2]).
--export([subscribe/3, unsubscribe/3, publish/3, 
+-export([subscribe/3, unsubscribe/3, publish/3,
 	 fold_subscriptions/4, topic_name/1]).
 
 -export([enql/3, enqr/3]).
@@ -31,8 +31,8 @@
 
 -define(eot, '$end_of_table').
 -define(top, <<>>).
--define(is_internal_key(Key), (((Key) =:= []) 
-			       orelse 
+-define(is_internal_key(Key), (((Key) =:= [])
+			       orelse
 				 (is_list((Key)) andalso is_atom(hd((Key)))))).
 
 -type eot() :: '$end_of_table'.
@@ -268,7 +268,7 @@ foldr_matching(Table, Pattern, Func, Acc) ->
 	    case lookup(Table, PatternKey) of
 		[Elem={_Key,_Value}] -> Func(Elem,Acc);
 		[] -> []
-	    end;	
+	    end;
 	Parent ->
 	    Q = queue:from_list([Parent]),
 	    foldbr_(Table,
@@ -288,7 +288,7 @@ depth_first(Table,Func,Acc) ->
 -spec breadth_first(Table::table(), Fun::foldfunc(), Acc::term()) -> term().
 breadth_first(Table,Func,Acc) ->
     foldbl(Table,Func,Acc).
-    
+
 %% Fold over the tree depth first left to right
 -spec foldl(Table::table(), Fun::foldfunc(), Acc::term()) -> term().
 
@@ -347,7 +347,7 @@ foldbr(Table,Func,Acc) ->
 foldbr_(Table,Func,Acc,Q) ->
     case queue:out(Q) of
 	{{value,K},Q1} ->
-	    Q2 = enqr(Table,K,Q1),	    
+	    Q2 = enqr(Table,K,Q1),
 	    case lookup(Table,K) of
 		[Elem] ->
 		    Acc1 = Func(Elem,Acc),
@@ -421,7 +421,7 @@ list_leafs__(Table,Child,Handler,Acc) ->
     case next_sibling_(Table, Child) of
 	'$end_of_table' -> Acc1;
 	Next -> list_leafs__(Table,Next,Handler,Acc1)
-    end.    
+    end.
 
 -spec publish(Table::table(), Topic::key(), Value::term()) -> ok.
 
@@ -443,7 +443,7 @@ publish(Table, Topic, Value) ->
 fold_subscriptions(Fun, Acc, Table, Topic) ->
     case internal_key(Topic) of
 	[] -> fold_leafs_(Fun, Acc,Table,[[]]);
-	Key -> 
+	Key ->
 	    Q = push_star_node(Table,[],[[]]),
 	    fold_pat_(Fun,Acc,Table,Key,Q,[])
     end.
@@ -461,14 +461,14 @@ fold_pat_(Fun,Acc,Table,Ks0=[K|_],[N|IN],Q0) ->
 fold_leafs_(Fun,Acc,Table,[Node|Ns]) ->
     case first_child_(Table,Node++['$']) of
 	'$end_of_table' -> fold_leafs_(Fun,Acc,Table,Ns);
-	Child -> 
+	Child ->
 	    Acc1 = fold_leafs__(Fun,Acc,Table,Child),
 	    fold_leafs_(Fun,Acc1,Table,Ns)
     end;
 fold_leafs_(_Fun,Acc,_Table,[]) ->
     Acc.
 
-%% traverse all subscribers 
+%% traverse all subscribers
 fold_leafs__(Fun,Acc,Table,Child) ->
     Acc1 = case lists:reverse(Child) of
 	       [N,'$'|Cs] when is_integer(N) ->
@@ -502,7 +502,7 @@ keep_star_node(N,Q) ->
 	true -> [N|Q];
 	false -> Q
     end.
-    
+
 %% walk possible zero transitions
 %% pattern: '*' ['*']*
 push_star_node(Table,N,Q) ->
@@ -579,7 +579,7 @@ match_drop(K, [_|Ks]) -> match_drop(K,Ks);
 match_drop(_K, []) -> false.
 
 %%
-%% @doc 
+%% @doc
 %%    Check if key contains * or ? in the pattern
 %%
 -spec is_pattern_key(Key::key()) -> boolean().
@@ -593,7 +593,7 @@ is_pattern_path([_|As]) -> is_pattern_path(As);
 is_pattern_path([]) -> false.
 
 %%
-%% @doc 
+%% @doc
 %%    Check if key ends in * or ?
 %%
 -spec is_prefix_key(Key::key()) -> boolean().
@@ -603,14 +603,14 @@ is_prefix_key(Key) ->
 
 is_prefix_path([]) -> false;
 is_prefix_path(Key) -> is_prefix_path_(Key).
-    
+
 is_prefix_path_(['*']) -> true;
 is_prefix_path_(['?']) -> true;
 is_prefix_path_(['*'|_]) -> false;
 is_prefix_path_(['?'|_]) -> false;
 is_prefix_path_([_|As]) -> is_prefix_path_(As);
 is_prefix_path_([]) -> false.
-    
+
 %%
 %% Match keys are in the form of normal keys or:
 %% allow * in place of components
@@ -629,7 +629,7 @@ pattern_key(Name) when is_list(Name) ->
     ipath(binary:split(iolist_to_binary(Name),<<".">>,[global])).
 
 %%
-%% External keys are in the form 
+%% External keys are in the form
 %% "a.b.c"
 %% "a.2"
 %% "a.b.2.c"
@@ -659,7 +659,7 @@ ipath([P|Ps]) ->
 	    try bin_to_integer(P) of
 		I -> [I | ipath(Ps)]
 	    catch
-		error:_ -> error(bad_key)
+		error:_ -> [ binary_to_atom(P, latin1) | ipath(Ps) ]
 	    end;
 	P -> %% existing atom?
 	    [ binary_to_atom(P, latin1) | ipath(Ps) ]
@@ -668,7 +668,11 @@ ipath([]) ->
     [].
 
 bin_to_integer(Bin) -> %% R15 support
-    list_to_integer(binary_to_list(Bin)).
+    try binary_to_integer(Bin)
+    catch
+      error:undef ->
+        list_to_integer(binary_to_list(Bin))
+    end.
 
 external_key(Key) when ?is_internal_key(Key) ->
     iolist_to_binary(join(xpath(Key), $.)).

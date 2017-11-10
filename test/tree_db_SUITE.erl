@@ -8,10 +8,17 @@
 %%%-------------------------------------------------------------------
 -module(tree_db_SUITE).
 
-%% Note: This directive should only be used in test suites.
--compile(export_all).
+-include_lib("common_test/include/ct.hrl").
 
--include_lib("test_server/include/test_server.hrl").
+-export([init_per_suite/1,
+         end_per_suite/1,
+         init_per_testcase/2,
+         end_per_testcase/2,
+         all/0, all/1,
+         suite/0,
+         a_test_case/1]).
+
+-export([tree/1, match_success/1, match_failure/1, pubsub/1]).
 
 %%--------------------------------------------------------------------
 %% TEST SERVER CALLBACK FUNCTIONS
@@ -19,7 +26,7 @@
 
 suite() -> [].
 
-all() -> 
+all() ->
     [tree, match_success, match_failure, pubsub].
 
 %%--------------------------------------------------------------------
@@ -127,7 +134,7 @@ end_per_testcase(_TestCase, _Config) ->
 all(doc) ->
     ["Describe the main purpose of this suite"];
 
-all(suite) -> 
+all(suite) ->
     [tree, match_success, match_failure, pubsub].
 
 
@@ -139,9 +146,9 @@ tree(doc) ->
     ["Test basic tree properties"];
 tree(suite) -> [];
 tree(Config) when is_list(Config) ->
-    ?line T = tree_db:insert(test_t, [{"a.b.x", 1}, {"a.b.y", 2}, {"a.b.z", 3}, {"b.c.x", 4}]),
-    ?line = [{[b,c,x],4}] = tree_db:foldl_matching(tree, "b.c.*", fun(E,A) -> [E|A] end, []),
-    ?line [{[a,b,x],1},{[a,b,y],2},{[a,b,z],3}] = lists:sort(tree_db:foldl_matching(tree, "a.b.?", fun(E,A) -> [E|A] end, [])),
+    ?line T = tree_db:from_list(test_t, [{"a.b.x", 1}, {"a.b.y", 2}, {"a.b.z", 3}, {"b.c.x", 4}]),
+    ?line [{[b,c,x],4}] = tree_db:foldl_matching(T, "b.c.*", fun(E,A) -> [E|A] end, []),
+    ?line [{[a,b,x],1},{[a,b,y],2},{[a,b,z],3}] = lists:sort(tree_db:foldl_matching(T, "a.b.?", fun(E,A) -> [E|A] end, [])),
     ok.
 
 
@@ -214,11 +221,11 @@ callback(Topic,_Key,_Value) ->
 %% @spec TestCase(Arg) -> Descr | Spec | ok | exit() | {skip,Reason}
 %% @end
 %%--------------------------------------------------------------------
-a_test_case(doc) -> 
+a_test_case(doc) ->
     ["Describe the main purpose of this test case"];
 
-a_test_case(suite) -> 
+a_test_case(suite) ->
     [];
 
-a_test_case(Config) when is_list(Config) -> 
+a_test_case(Config) when is_list(Config) ->
     ok.
