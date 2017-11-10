@@ -245,10 +245,10 @@ foldl_matching(Table, Pattern, Func, Acc) ->
 	PatternKey -> %% plain key
 	    case lookup(Table, PatternKey) of
 		[Elem={_Key,_Value}] -> Func(Elem,Acc);
-		[] -> []
-	    end;	
+		[] -> Acc
+	    end;
 	Parent ->
-	    Q = enql(Table,Parent,queue:new()),
+	    Q = queue:from_list([Parent]),
 	    foldbl_(Table,
 		    fun(Elem={Key,_Value}, Acci) ->
 			    case match_ikeys(PatternKey, Key) of
@@ -270,7 +270,7 @@ foldr_matching(Table, Pattern, Func, Acc) ->
 		[] -> []
 	    end;	
 	Parent ->
-	    Q = enqr(Table,Parent,queue:new()),
+	    Q = queue:from_list([Parent]),
 	    foldbr_(Table,
 		    fun(Elem={Key,_Value}, Acci) ->
 			    case match_ikeys(PatternKey, Key) of

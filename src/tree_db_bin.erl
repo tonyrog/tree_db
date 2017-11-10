@@ -10,7 +10,7 @@
 -export([new/1, lookup/2, lookup_ts/2, insert/2, delete/1, delete/2, clear/1,
 	 first/1, last/1, next/2, prev/2,
 	 first_child/2, last_child/2, next_sibling/2, prev_sibling/2,
-	 foldl/3, foldr/3, foldbl/3, foldbr/3,
+	 foldl/3, foldr/3, foldbl/3, foldbl/4, foldbr/3, foldbr/4,
 	 foldbl_ts/3,
 	 depth_first/3, breadth_first/3]).
 -export([put/3, put/4, get/2, get_ts/2]).
@@ -264,14 +264,14 @@ foldl_matching(Table, Pattern, Fun, Acc) ->
 		[] -> Acc
 	    end;
 	Parent ->
-	    Q = enql(Table,Parent,queue:new()),
-	    foldbl_(Table,
-		    fun(Elem={Key,_Value}, Acci) ->
-			    case match_ikeys(PatternKey, Key) of
-				true -> Fun(Elem,Acci);
-				false -> Acci
-			    end
-		    end, Acc, Q)
+	    Q = queue:from_list([Parent]),
+	    foldbl(Table,
+		   fun(Elem={Key,_Value}, Acci) ->
+			   case match_ikeys(PatternKey, Key) of
+			       true -> Fun(Elem,Acci);
+			       false -> Acci
+			   end
+		   end, Acc, Q)
     end.
 
 -spec fold_matching_ts(Table::table(), Pattern::key(),
@@ -292,7 +292,7 @@ foldl_matching_ts(Table, Pattern, Fun, Acc) ->
 		[] -> Acc
 	    end;
 	Parent ->
-	    Q = enql(Table,Parent,queue:new()),
+	    Q = queue:from_list([Parent]),
 	    foldbl_ts_(Table,
 		       fun(Elem={Key,_Value,_TimeStamp}, Acci) ->
 			       case match_ikeys(PatternKey, Key) of
@@ -314,8 +314,8 @@ foldr_matching(Table, Pattern, Func, Acc) ->
 		[] -> Acc
 	    end;
 	Parent ->
-	    Q = enqr(Table,Parent,queue:new()),
-	    foldbr_(Table,
+	    Q = queue:from_list([Parent]),
+	    foldbr(Table,
 		    fun(Elem={Key,_Value}, Acci) ->
 			    case match_ikeys(PatternKey, Key) of
 				true -> Func(Elem,Acci);
@@ -364,18 +364,18 @@ foldr_(Table,Func,Acc,K) ->
 
 foldbl(Table,Func,Acc) ->
     Q = enql(Table,[],queue:new()),
-    foldbl_(Table,Func,Acc,Q).
+    foldbl(Table,Func,Acc,Q).
 
-foldbl_(Table,Func,Acc,Q) ->
+foldbl(Table,Func,Acc,Q) ->
     case queue:out(Q) of
 	{{value,K},Q1} ->
 	    Q2 = enql(Table,K,Q1),
 	    case lookup(Table,K) of
 		[Elem] ->
 		    Acc1 = Func(Elem,Acc),
-		    foldbl_(Table,Func,Acc1,Q2);
+		    foldbl(Table,Func,Acc1,Q2);
 		[] ->
-		    foldbl_(Table,Func,Acc,Q2)
+		    foldbl(Table,Func,Acc,Q2)
 	    end;
 	{empty,_Q1} ->
 	    Acc
@@ -408,18 +408,18 @@ foldbl_ts_(Table,Func,Acc,Q) ->
 
 foldbr(Table,Func,Acc) ->
     Q = enqr(Table,[],queue:new()),
-    foldbr_(Table,Func,Acc,Q).
+    foldbr(Table,Func,Acc,Q).
 
-foldbr_(Table,Func,Acc,Q) ->
+foldbr(Table,Func,Acc,Q) ->
     case queue:out(Q) of
 	{{value,K},Q1} ->
 	    Q2 = enqr(Table,K,Q1),	    
 	    case lookup(Table,K) of
 		[Elem] ->
 		    Acc1 = Func(Elem,Acc),
-		    foldbr_(Table,Func,Acc1,Q2);
+		    foldbr(Table,Func,Acc1,Q2);
 		[] ->
-		    foldbr_(Table,Func,Acc,Q2)
+		    foldbr(Table,Func,Acc,Q2)
 	    end;
 	{empty,_Q1} ->
 	    Acc
@@ -792,6 +792,3 @@ unique() ->
 	    {MS,S,US} = apply(erlang,now,[]),
 	    (MS*1000000+S)*1000000+US
     end.
-
-	    
-	
