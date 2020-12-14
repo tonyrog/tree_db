@@ -2,6 +2,7 @@
  [
   {description, "Tree oriented key value storage using ets table"},
   {vsn, git},
+  {modules, ["@@MODULES@@"]},
   {registered, []},
   {applications, [
                   kernel,
