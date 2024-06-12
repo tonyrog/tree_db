@@ -21,6 +21,9 @@
 -define(TABLE,  tree_db).
 -define(TABLE_T(), term()).
 
+%%-define(dbg(F,A), io:format((F),(A))).
+-define(dbg(F,A), ok).
+
 -record(state,
 	{
 	  table :: ?TABLE_T()  %% items = {Key,Value,Timestamp}
@@ -94,7 +97,7 @@ handle_call(_Request, _From, State) ->
 %% @end
 %%--------------------------------------------------------------------
 handle_cast(_Msg, State) ->
-    lager:warning("unhandled cast ~p", [_Msg]),
+    ?dbg("unhandled cast ~p", [_Msg]),
     {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -108,7 +111,7 @@ handle_cast(_Msg, State) ->
 %% @end
 %%--------------------------------------------------------------------
 handle_info(_Info, State) ->
-    lager:warning("unhandled info ~p", [_Info]),
+    ?dbg("unhandled info ~p", [_Info]),
     {noreply, State}.
 
 %%--------------------------------------------------------------------
